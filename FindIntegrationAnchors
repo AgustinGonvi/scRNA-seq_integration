@@ -1,0 +1,209 @@
+---
+title: "Seurat: Comprenhensive Integration of Single-Cell Data"
+output: html_notebook
+---
+
+## Load Libraries
+```{r}
+library(Seurat)
+library(cowplot)
+library(stringr)
+library(xlsx)
+library(ggplot2)
+```
+
+### Data Paths
+```{r}
+path_KMY <-  "..\\00_Data\\1_GSM4331828_Kidney-M-Y\\01SOb_nonScaled_Young_M.rds"
+path_KMO <-  "..\\00_Data\\2_GSM4331829_Kidney-M-O\\01SOb_nonScaled_Old_M.rds"
+path_KMCR <- "..\\00_Data\\3_GSM4331830_Kidney-M-CR\\01SOb_nonScaled_OCR_M.rds"
+path_KFY <-  "..\\00_Data\\4_GSM4331831_Kidney-F-Y\\01SOb_nonScaled_Young_F.rds"
+path_KFO <-  "..\\00_Data\\5_GSM4331832_Kidney-F-O\\01SOb_nonScaled_Old_F.rds"
+path_KFCR <- "..\\00_Data\\6_GSM4331833_Kidney-F-CR\\01SOb_nonScaled_OCR_F.rds"
+```
+
+## Import Seruat objects
+```{r}
+ob_1_KMY <- readRDS(file = path_KMY)
+#ob_1_KMY$sample <- "K_Young_M"
+```
+```{r}
+ob_2_KMO <- readRDS(file = path_KMO)
+#ob_2_KMO$sample <- "K_Old_M"
+```
+```{r}
+ob_3_KMCR <- readRDS(file = path_KMCR)
+#ob_3_KMCR$sample <- "K_OCR_M"
+
+```
+```{r}
+ob_4_KFY <- readRDS(file = path_KFY)
+#ob_4_KFY$sample <- "K_Young_F"
+```
+```{r}
+ob_5_KFO <- readRDS(file = path_KFO)
+#ob_5_KFO$sample <- "K_Old_F"
+```
+```{r}
+ob_6_KFCR <- readRDS(file = path_KFCR)
+#ob_6_KFCR$sample <- "K_OCR_F"
+```
+
+## Integrate Conditions
+```{r}
+all.anchors <- FindIntegrationAnchors(object.list = list(ob_1_KMY,
+                                                         ob_2_KMO,
+                                                         ob_3_KMCR,
+                                                         ob_4_KFY,
+                                                         ob_5_KFO,
+                                                         ob_6_KFCR), dims = 1:20)
+all.combined <- IntegrateData(anchorset = all.anchors, dims = 1:20)
+```
+
+
+## Integrate Analysis
+```{r}
+DefaultAssay(object = all.combined) <- "integrated"
+
+all.combined <- ScaleData(object = all.combined, verbose = FALSE)
+all.combined <- RunPCA(object = all.combined, npcs = 30, verbose = FALSE)
+```
+
+## UMAP and Clustering
+```{r}
+Resolution <- 0.7
+all.combined <- RunUMAP(object = all.combined, reduction = "pca", dims = 1:20)
+all.combined <- FindNeighbors(object = all.combined, reduction = "pca", dims = 1:20)
+all.combined <- FindClusters(all.combined, resolution = Resolution)
+```
+
+## Visualization
+```{r}
+p1 <- DimPlot(object = all.combined, reduction = "umap", group.by = "sample")
+p1
+p2 <- DimPlot(object = all.combined, reduction = "umap", label = TRUE)
+p2
+umap <- plot_grid(p1,p2)
+ggsave(paste("01_umap_combined_plot_res-", Resolution, ".png", sep = ""),
+       umap, width=53, height=29, units="cm")
+
+umap_c <- DimPlot(object = all.combined, split.by = "sample")
+ggsave(paste("02_umap_compare_plot_res-", Resolution, ".png", sep = ""),
+       umap_c, width=53, height=29, units="cm")
+```
+
+## Create FindConservedMarkers Function
+```{r}
+DefaultAssay(object = all.combined) <- "RNA"
+clus = 0
+while (clus < length(levels(all.combined@meta.data$seurat_clusters)))
+{
+    print(paste("Cluster", clus, sep=" "))
+    markers <- FindConservedMarkers(object = all.combined,
+                                    ident.1=clus,
+                                    grouping.var="sample",
+                                    min.cells.group = 1,
+                                    verbose=FALSE)
+    if (clus == 0) {
+        write.xlsx(markers, file = paste("Integrated_clusters_markers_res-", Resolution, ".xlsx", sep = ""),
+                   sheetName = paste("Cluster", clus, sep="_"), append=FALSE)
+    }
+    else {
+        write.xlsx(markers, paste("Integrated_clusters_markers_res-", Resolution, ".xlsx", sep = ""),
+                   sheetName = paste("Cluster", clus, sep="_"), append=TRUE)
+    }
+    clus = clus + 1
+    gc(verbose = T)
+}
+
+save.image(file= paste("Data_res-", Resolution, ".RData", sep = ""))
+```
+
+# Plot markers by Cluster
+```{r}
+
+# Cell Markers
+POD <- c("Podxl", "Nphs1", "Ptpro", "Mafb", "Wt1", "Nphs2")         # Podocytes
+PT_S1 <- c("Slc5a12", "Slc27a2", "Lrp2")                            # Proximal Tubule
+PT_S2 <- c("Slc27a2", "Lrp2")                                       # Proximal Tubule
+PT_S3 <- c("Slc5a10", "Slc27a2", "Lrp2")                            # Proximal Tubule
+TDL <- c("Aqp1", "Epha7")                                                    # Thin descending limb
+THAL <- c("Slc12a1", "Umod", "Cldn14", "Cldn18", "Cldn16", "Cldn19") # Thick ascending limb
+JGA <- c("Cfh", "Ren1")                                             # Juxtaglomerular apparatus
+DCT <- c("Slc12a3")                                                 # Distal convoluted tubule
+CNT <- c("Pde3b", "Tmem45b")                                        # Connecting tubule
+CD1 <- c("Aqp2", "Hsd11b2")                                         # Principal cell of collecting duct
+CD2 <- c("Atp6v1g3", "Atp6v0d2", "Slc4a1")                          # Intercalated Cells Type A
+CD3 <- c("Atp6v1g3", "Atp6v0d2", "Slc26a4", "Hmx2")                 # Intercalated Cells Type B
+
+MES <- c("Fhl2", "Myl9", "Itga8", "Fbin5")                          # Mesangial Cells
+Epi <- c("Krt8", "Krt18")                                           # Epithelial Cell       ["Muc1",]
+EC <- c("Pecam1", "Emcn", "Flt1", "Tek")                            # Endothelial cell
+smC <- c("Acta2")                                                   # Smooth muscle cell
+
+
+B   <- c("Cd19", "Cd79b")                                       # B cell
+DC1 <- c("Cd74")                                                # Irf8- Dendritic cell
+DC2 <- c("Cd74", "Irf8")                                        # Irf8+ Dendritic cell
+M1  <- c("Cd68", "Cd14")                                        # Macrophage I
+M2  <- c("Cd68", "Cd14", "Cd163")                               # Macrophage II
+Neu <- c("Pglyrp1", "Lcn2", "Camp")                             # Neutrophil
+NK  <- c("Klrb1a", "Cd8a")                                      # Natural killer cell
+T2  <- c("Cd3d", "Cd3e","Cd3g", "Cd8a")                         # CD8+ T cell
+
+FTR <- c("Slc5a10", "Slc5a9", "Slc2a2", "Slc2a5")
+FMB <- c("Hk1", "Khk", "Aldob", "Aldoa", "Tkfc", "Tpi1", "Sord")
+
+Fru <- c("Slc5a10", "Slc2a2", "Slc2a5", "Sord", "Khk", "Aldob", "Tkfc")
+
+
+markers <- MES
+
+VlnPlot(object = all.combined,
+        features = markers)
+
+VlnPlot(object = all.combined,
+        features = markers,
+        slot = 'counts',
+        log = T)
+
+FeaturePlot(object = all.combined,
+            features = markers)
+```
+
+
+
+```{r}
+combined <- RenameIdents(all.combined,
+                         '0' = 'THAL_Cldn16(-)',
+                         '1' = 'M1 and Dendritic C',
+                         '2' = 'PT_S1',
+                         '3' = 'THAL',
+                         '4' = 'PT_S3',
+                         '5' = 'PT_?1',
+                         '6' = 'THAL',
+                         '7' = 'PT_?2',
+                         '8' = 'CD_Int-B',
+                         '9' = 'M1 and Dendritic C',
+                         '10' = 'CD_Int-A',
+                         '11' = 'TDL',
+                         '12' = 'NK and T2',
+                         '13' = 'M1 and M2',
+                         '14' = 'CD_Principal',
+                         '15' = 'DCT',
+                         '16' = 'Endothelial_Flt1(-)',
+                         '17' = 'CD_Int-A',
+                         '18' = 'Endothelial',
+                         '19' = 'UNDEFINED',
+                         '20' = 'Smooth Muscle',
+                         '21' = 'UNDEFINED')
+                        
+
+umap <- DimPlot(object = combined, label = T,
+                # can use a vector here to assign specific colors to clusters cols = c('#0000FF',   #0'#FFEE20',   #1'#49C64E',   #2'#A6E9A9',   #3'#D3D3D3',   #4'#FF0000',   #5'#FF0000',   #6'#FF0000',   #7'#A600FF',   #8'#FF0000',   #9'#FF0000',  #10'#FF0000',  #11'#FF0000',  #12'#FF0000',  #13 '#FF0000'), #14
+                pt.size=1,
+                label.size = 8)
+
+ggsave(paste("04_umap_cluster_colored_w_label_res-", Resolution, ".png", sep = ""),
+       umap, width=40, height=40, units='cm')
+```
